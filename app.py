@@ -6,7 +6,7 @@ from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
 # --- 設定：ページレイアウトを広めに ---
-st.set_page_config(layout="wide", page_title="🧩 Living Hinge Generator")
+st.set_page_config(layout="wide", page_title="🧩 Living Hinge Generator v5")
 
 def clip_line_to_height(p1, p2, height):
     """
@@ -16,97 +16,97 @@ def clip_line_to_height(p1, p2, height):
     x1, y1 = p1
     x2, y2 = p2
 
-    # 完全に範囲外（両方の端点が上すぎるか、下すぎる）
+    # 完全に範囲外
     if (y1 < 0 and y2 < 0) or (y1 > height and y2 > height):
         return None, None
 
-    # y1が範囲外の場合のクリッピング
+    # y1のクリッピング
     if y1 < 0:
-        x1 = x1 + (x2 - x1) * (0 - y1) / (y2 - y1)
+        if y2 != y1: x1 = x1 + (x2 - x1) * (0 - y1) / (y2 - y1)
         y1 = 0
     elif y1 > height:
-        x1 = x1 + (x2 - x1) * (height - y1) / (y2 - y1)
+        if y2 != y1: x1 = x1 + (x2 - x1) * (height - y1) / (y2 - y1)
         y1 = height
 
-    # y2が範囲外の場合のクリッピング
+    # y2のクリッピング
     if y2 < 0:
-        x2 = x1 + (x2 - x1) * (0 - y1) / (y2 - y1)
+        if y2 != y1: x2 = x1 + (x2 - x1) * (0 - y1) / (y2 - y1)
         y2 = 0
     elif y2 > height:
-        x2 = x1 + (x2 - x1) * (height - y1) / (y2 - y1)
+        if y2 != y1: x2 = x1 + (x2 - x1) * (height - y1) / (y2 - y1)
         y2 = height
         
     return (x1, y1), (x2, y2)
 
 
 def generate_hinge_dxf(width, height, cut_length, gap, separation, cut_width, include_frame, pattern_type):
-    """
-    DXFドキュメントを生成する関数
-    """
     doc = ezdxf.new()
     msp = doc.modelspace()
     
-    # --- 1. 外枠の描画 (オン/オフ機能) ---
+    # 1. 外枠
     if include_frame:
         msp.add_lwpolyline([(0, 0), (width, 0), (width, height), (0, height), (0, 0)])
     
-    # --- 2. ヒンジパターンの生成 ---
+    # 2. パターン生成
     current_x = separation
     row_count = 0
     
-    while current_x < width - separation:
+    # ループ回数の安全装置（無限ループ防止）
+    max_cols = int(width / separation) + 2
+    
+    for _ in range(max_cols):
+        if current_x > width - separation:
+            break
+
+        # 偶数行・奇数行のYシフト
         if row_count % 2 == 0:
             y_shift = 0
         else:
             y_shift = -(cut_length + gap) / 2
             
         current_y = y_shift
-            
-        while current_y < height:
+        
+        # Y方向のループ（安全装置付き）
+        max_rows = int(height / (cut_length + gap)) + 3
+        
+        for _ in range(max_rows):
+            if current_y > height:
+                break
+
             p_start_y = current_y + gap
             p_mid_y = p_start_y + cut_length / 2
             p_end_y = p_start_y + cut_length
 
-            # 基本的な範囲チェック（完全に上すぎるものはスキップ）
+            # 描画対象チェック
             if p_end_y > 0:
-                
+                lines_to_draw = []
+
                 if pattern_type == "直線 (Basic Straight)":
-                    # ------------------------------------
-                    # A. 直線パターン (Y軸方向の単純クリッピング)
-                    # ------------------------------------
-                    sy = max(0, p_start_y)
-                    ey = min(height, p_end_y)
-                    
-                    if sy < ey:
-                        msp.add_line((current_x, sy), (current_x, ey))
+                    lines_to_draw.append(((current_x, p_start_y), (current_x, p_end_y)))
 
                 elif pattern_type == "ひし形 (Chevron/V-cut)":
-                    # ------------------------------------
-                    # B. ひし形パターン (斜め線のクリッピング)
-                    # ------------------------------------
-                    # 頂点の定義
+                    # V字の頂点計算
+                    # current_x を中心として、左右に cut_width / 2 ずつ振る
                     P_top_L = (current_x - cut_width / 2, p_start_y)
                     P_top_R = (current_x + cut_width / 2, p_start_y)
-                    P_mid = (current_x, p_mid_y)
+                    P_mid   = (current_x, p_mid_y)
                     P_btm_L = (current_x - cut_width / 2, p_end_y)
                     P_btm_R = (current_x + cut_width / 2, p_end_y)
                     
-                    # 4本の斜線それぞれについて、はみ出しを計算して描画
                     lines_to_draw = [
-                        (P_top_L, P_mid), # 上向きV 左
-                        (P_top_R, P_mid), # 上向きV 右
-                        (P_btm_L, P_mid), # 下向きV 左
-                        (P_btm_R, P_mid)  # 下向きV 右
+                        (P_top_L, P_mid), # 上V 左
+                        (P_top_R, P_mid), # 上V 右
+                        (P_btm_L, P_mid), # 下V 左
+                        (P_btm_R, P_mid)  # 下V 右
                     ]
-                    
-                    for p1, p2 in lines_to_draw:
-                        # クリッピング関数を呼び出す
-                        clipped_p1, clipped_p2 = clip_line_to_height(p1, p2, height)
-                        # 有効な線分が返ってきたら描画
-                        if clipped_p1 is not None and clipped_p2 is not None:
-                            # ゼロ除算防止等のため、念のため長さチェック
-                            if abs(clipped_p1[0] - clipped_p2[0]) > 1e-6 or abs(clipped_p1[1] - clipped_p2[1]) > 1e-6:
-                                msp.add_line(clipped_p1, clipped_p2)
+                
+                # 線分のクリッピングと描画
+                for p1, p2 in lines_to_draw:
+                    cp1, cp2 = clip_line_to_height(p1, p2, height)
+                    if cp1 is not None and cp2 is not None:
+                        # 長さがほぼ0のゴミデータを除外
+                        if (cp1[0]-cp2[0])**2 + (cp1[1]-cp2[1])**2 > 0.001:
+                            msp.add_line(cp1, cp2)
 
             current_y += cut_length + gap
             
@@ -116,66 +116,72 @@ def generate_hinge_dxf(width, height, cut_length, gap, separation, cut_width, in
     return doc
 
 def draw_preview(doc):
-    """
-    ezdxfのデータをmatplotlibの図として描画する関数
-    """
-    # グラフの設定 (サイズを少し大きくしました)
     fig, ax = plt.subplots(figsize=(10, 6)) 
-    
     ax.set_aspect('equal') 
     ax.axis('on')
-    ax.set_title("プレビュー (寸法は目安)", fontsize=10)
-    # Y軸の範囲を少し広げて、はみ出しがないか確認しやすくする
-    # ax.set_ylim(ymin=-5, ymax=height+5) # 必要に応じてコメントアウト解除
+    ax.set_title("プレビュー", fontsize=10)
     
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax)
     frontend = Frontend(ctx, out)
-    
     frontend.draw_layout(doc.modelspace(), finalize=True)
     ax.autoscale_view() 
-    
     return fig
 
 # --- Streamlit UI ---
 st.title("🧩 リビングヒンジ DXFジェネレーター")
+st.markdown("ダイヤモンドパターンでもバラバラにならないよう、パラメータの安全範囲を確認できます。")
 
 col1, col2 = st.columns([1, 2])
 
 with col1:
     st.markdown("### 🛠️ パラメータ設定")
     
-    # --- 形状選択 ---
     pattern_type = st.selectbox(
-        "スリット形状の選択",
+        "スリット形状",
         ["直線 (Basic Straight)", "ひし形 (Chevron/V-cut)"],
-        index=1 # デフォルトをひし形に変更
+        index=1
     )
     
     st.markdown("---")
     
-    # --- 全体サイズ ---
     st.markdown("#### 📐 全体サイズ")
     w = st.number_input("全体の幅 (mm)", value=100.0, step=1.0)
     h = st.number_input("全体の高さ (mm)", value=50.0, step=1.0)
-    
-    include_frame = st.checkbox("外枠のカットラインを含める", value=True)
+    include_frame = st.checkbox("外枠を含める", value=True)
     
     st.markdown("#### 📏 パターン詳細")
     
-    # --- パターン共通 ---
-    cut_len = st.number_input("カット長 (mm)", value=30.0, step=0.5)
-    gap = st.number_input("ブリッジ幅 (mm)", value=3.0, step=0.1)
-    separation = st.number_input("列の間隔 (mm)", value=1.5, step=0.1)
+    # 1. 最初に「列の間隔」を決める（これが基準になるため）
+    separation = st.number_input("列の間隔 (Pitch X) (mm)", value=3.0, step=0.5, min_value=1.0, help="列と列の中心距離。これが広いほど強度が上がり、狭いほど柔軟になります。")
+
+    # 2. V字幅の計算と制限表示
+    # 安全のため、V字幅は「列間隔 × 1.8」程度以内に抑えないと、隣のV字と重なりすぎて強度が落ちる
+    safe_max_width = separation * 1.8
+    warning_msg = ""
     
-    # --- ひし形専用パラメータ ---
     cut_width = 0.0
     if pattern_type == "ひし形 (Chevron/V-cut)":
-        cut_width = st.number_input("V字の横幅 (mm)", value=3.0, step=0.1) # デフォルト値を少し大きく
+        st.markdown(f"**推奨V字幅:** {safe_max_width:.1f} mm 以下")
+        cut_width = st.number_input(
+            "V字の横幅 (mm)", 
+            value=min(2.0, safe_max_width), # 初期値も安全圏に
+            step=0.1, 
+            min_value=0.1
+        )
+        
+        # 警告ロジック
+        if cut_width > separation * 2.0:
+            st.error("⚠️ **危険:** V字幅が広すぎます！カット線が交差し、素材が脱落する可能性があります。")
+        elif cut_width > safe_max_width:
+            st.warning("⚠️ **注意:** V字幅が広めです。隣の列と近接しています。")
+        else:
+            st.success("✅ 強度的に安全な範囲です。")
     
-    
-    # --- リアルタイム生成とダウンロード ---
-    # エラーハンドリングを追加
+    cut_len = st.number_input("カット長 (Length) (mm)", value=30.0, step=0.5)
+    gap = st.number_input("ブリッジ幅 (Gap Y) (mm)", value=3.0, step=0.1, min_value=0.5, help="縦方向のつなぎ目。これが小さすぎると切れてしまいます。")
+
+    # 生成処理
     try:
         doc = generate_hinge_dxf(w, h, cut_len, gap, separation, cut_width, include_frame, pattern_type)
         
@@ -189,8 +195,8 @@ with col1:
             use_container_width=True
         )
     except Exception as e:
-        st.error(f"DXF生成エラー: {e}")
-        doc = None # プレビュー用にNoneにする
+        st.error(f"エラー: {e}")
+        doc = None
 
 with col2:
     st.markdown("### 🖼️ プレビュー")
@@ -198,6 +204,7 @@ with col2:
         try:
             fig = draw_preview(doc)
             st.pyplot(fig)
-            st.caption(f"描画サイズ: {w}mm x {h}mm")
+            if pattern_type == "ひし形 (Chevron/V-cut)":
+                st.caption(f"ℹ️ ヒント: プレビューで線が密集して黒くなっている場合は、V字幅を小さくするか、列の間隔を広げてください。")
         except Exception as e:
             st.error(f"プレビュー描画エラー: {e}")
