@@ -79,4 +79,25 @@ with col1:
     st.markdown("---")
     cut_len = st.number_input("カット長 (mm)", value=30.0, step=0.5, help="直線の切れ込みの長さ")
     gap_len = st.number_input("ブリッジ幅 (mm)", value=3.0, step=0.1, help="切れ込み同士の繋ぎ目（残る部分）")
-    sep_len = st.number_input("列の間隔 (mm)", value=1.5, step
+    sep_len = st.number_input("列の間隔 (mm)", value=1.5, step=0.1, help="隣の列との隙間。狭いほどよく曲がります")
+
+    # リアルタイムで生成
+    doc = generate_hinge_dxf(w, h, cut_len, gap_len, sep_len)
+    
+    # ダウンロードボタン
+    out = io.StringIO()
+    doc.write(out)
+    st.download_button(
+        label="📥 DXFをダウンロード",
+        data=out.getvalue(),
+        file_name="living_hinge.dxf",
+        mime="application/dxf",
+        use_container_width=True
+    )
+
+with col2:
+    st.markdown("### プレビュー")
+    # プレビュー描画
+    fig = draw_preview(doc)
+    st.pyplot(fig)
+    st.caption(f"サイズ: {w}mm x {h}mm / アスペクト比固定表示")
